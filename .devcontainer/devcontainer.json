@@ -1,0 +1,4 @@
+{
+  "name": "Jarvis",
+  "postStartCommand": "bash /workspaces/Jarvis/.devcontainer/start-hermes.sh"
+}
