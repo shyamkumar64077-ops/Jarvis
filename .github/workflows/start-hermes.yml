@@ -1,0 +1,56 @@
+name: Start Hermes stack in Codespace
+
+on:
+  workflow_dispatch:
+    inputs:
+      codespace:
+        description: "Codespace name"
+        required: false
+        default: "bookish-yodel-9694qxprr6563x9vr"
+      wait:
+        description: "Wait for codespace to be available before starting"
+        required: false
+        default: "true"
+
+permissions:
+  actions: read
+  contents: read
+  codespaces: write
+
+jobs:
+  start-hermes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for codespace to be running
+        env:
+          CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
+        run: |
+          for i in $(seq 1 40); do
+            state=$(gh api "/user/codespaces/$CS" --jq '.state' 2>/dev/null || echo unknown)
+            echo "attempt $i: state=$state"
+            if [ "$state" = "Available" ] || [ "$state" = "Running" ]; then
+              echo "codespace is up"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "codespace did not become available in time"
+          exit 1
+
+      - name: Start freellmapi + Hermes gateway inside the codespace
+        env:
+          CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
+        run: |
+          gh codespace ssh -c "$CS" -- bash /workspaces/Jarvis/.devcontainer/start-hermes.sh || true
+          sleep 45
+          gh codespace ssh -c "$CS" -- bash -c 'curl -s -o /dev/null -w "flm3001:%{http_code}\n" http://127.0.0.1:3001/v1/models; curl -s -o /dev/null -w "gw8642:%{http_code}\n" http://127.0.0.1:8642/v1/health'
+
+      - name: Make the forwarded ports public
+        env:
+          CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
+        run: |
+          gh codespace ports forward -c "$CS" 8642:8642 3001:3001 &
+          sleep 15
+          gh codespace ports visibility -c "$CS" 8642:public 3001:public || true
+          gh codespace ports -c "$CS" --json sourcePort,visibility,browseUrl || true
