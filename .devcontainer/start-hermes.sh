@@ -24,6 +24,74 @@ POLL_INTERVAL=2
 
 log() { echo "[start-hermes] $(date '+%H:%M:%S') $*"; }
 
+# --- 0. dependencies --------------------------------------------------------
+#
+# A codespace container can be created from scratch, so the home directory
+# may not have freellmapi or hermes installed yet. The lifecycle hook runs
+# once, on a container that has just been created - if the services are not
+# installed here, nothing else will ever start them.
+#
+# Everything below is a no-op when the dependency is already present.
+ensure_freellmapi() {
+  if [ -d "$FLM_SERVER_DIR" ]; then
+    return 0
+  fi
+  log "freellmapi not found at $FLM_SERVER_DIR - installing"
+
+  if ! command -v git >/dev/null 2>&1; then
+    log "ERROR: git is not available - cannot install freellmapi"
+    return 1
+  fi
+  if [ -d "$FLM_DIR/.git" ]; then
+    git -C "$FLM_DIR" pull --ff-only 2>&1 | sed 's/^/[start-hermes] /' || true
+  else
+    git clone --depth 1 https://github.com/tashfeenahmed/freellmapi.git "$FLM_DIR" \
+      2>&1 | sed 's/^/[start-hermes] /' || true
+  fi
+
+  if [ ! -d "$FLM_SERVER_DIR" ]; then
+    log "ERROR: $FLM_SERVER_DIR still missing after install attempt"
+    return 1
+  fi
+
+  if [ -f "$FLM_DIR/package.json" ] && [ ! -d "$FLM_DIR/node_modules" ]; then
+    log "installing freellmapi dependencies (npm install)"
+    ( cd "$FLM_DIR" && npm install --no-audit --no-fund ) \
+      > "$LOG_DIR/freellmapi-install.log" 2>&1 || true
+  fi
+  return 0
+}
+
+ensure_hermes() {
+  if command -v hermes >/dev/null 2>&1; then
+    return 0
+  fi
+  log "hermes binary not on PATH - installing"
+
+  if ! command -v pipx >/dev/null 2>&1 && ! command -v pip3 >/dev/null 2>&1; then
+    log "ERROR: no pipx/pip3 available - cannot install hermes"
+    return 1
+  fi
+
+  if command -v pipx >/dev/null 2>&1; then
+    pipx install hermes-agent > "$LOG_DIR/hermes-install.log" 2>&1 || true
+  else
+    pip3 install --user hermes-agent > "$LOG_DIR/hermes-install.log" 2>&1 || true
+  fi
+
+  # Refresh PATH - a fresh install may have landed in ~/.local/bin.
+  export PATH="$HOME/.local/bin:$HOME/.local/pipx/venvs/hermes-agent/bin:$PATH"
+
+  if ! command -v hermes >/dev/null 2>&1; then
+    log "ERROR: hermes still not on PATH after install attempt"
+    return 1
+  fi
+  return 0
+}
+
+ensure_freellmapi || true
+ensure_hermes || true
+
 # --- helpers ---------------------------------------------------------------
 
 # port_up <port> -> 0 when something is listening and answering on the port.
