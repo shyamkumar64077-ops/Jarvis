@@ -56,11 +56,24 @@ jobs:
 
       - name: Forward the ports
         run: |
+          # `gh codespace ports forward` is a blocking tunnel; run it in the
+          # background so the job continues. The forwarding is REGISTERED with
+          # the codespace as soon as it starts, which is what the visibility
+          # step below needs.
           gh codespace ports forward -c "$CS" 8642:8642 3001:3001 &
           sleep 20
 
       - name: Force port 8642 to public
         run: |
+          # Visibility can only be set once the port is forwarded; retry until
+          # the forwarding has registered both ports.
+          for i in $(seq 1 10); do
+            if gh codespace ports -c "$CS" --json sourcePort 2>/dev/null | grep -q 8642; then
+              break
+            fi
+            echo "attempt $i: port 8642 not registered yet, waiting"
+            sleep 10
+          done
           gh codespace ports visibility 8642:public -c ${{ env.CODESPACE_NAME }}
           gh codespace ports visibility 3001:public -c ${{ env.CODESPACE_NAME }} || true
 

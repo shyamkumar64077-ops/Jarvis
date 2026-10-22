@@ -84,16 +84,32 @@ fi
 # --- 3. hermes MCP server (optional, only if OAuth creds exist) ------------
 
 if [ -f "$HOME/.hermes-mcp-oauth.txt" ]; then
-  if pgrep -f "hermes-mcp serve" >/dev/null 2>&1; then
+  if pgrep -f "mcp serve" >/dev/null 2>&1; then
     log "hermes-mcp already running - skipping start"
   else
     log "starting hermes-mcp"
-    # shellcheck disable=SC1091
-    source "$HOME/.hermes-mcp-oauth.txt"
-    export HERMES_API_KEY="$(cat "$HOME/.hermes-api-key" 2>/dev/null)"
-    export HERMES_BIN="$(command -v hermes)"
-    nohup hermes-mcp serve > "$LOG_DIR/mcp.log" 2>&1 &
-    disown
+    # `set -a` + source so OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET are EXPORTED;
+    # plain source leaves them shell-local and hermes-mcp exits with
+    # "config error: OAUTH_CLIENT_ID is required".
+    #
+    # `hermes mcp serve` is a STDIO server: it exits the moment stdin closes.
+    # Redirect stdin from /dev/zero so it stays up, and setsid so it is not
+    # killed with the devcontainer's postStart shell.
+    (
+      set -a
+      # shellcheck disable=SC1091
+      . "$HOME/.hermes-mcp-oauth.txt"
+      set +a
+      export HERMES_API_KEY="$(cat "$HOME/.hermes-api-key" 2>/dev/null)"
+      export HERMES_BIN="$(command -v hermes)"
+      setsid nohup hermes mcp serve > "$LOG_DIR/mcp.log" 2>&1 < /dev/zero &
+    ) >/dev/null 2>&1
+    sleep 3
+    if pgrep -f "mcp serve" >/dev/null 2>&1; then
+      log "hermes-mcp started"
+    else
+      log "WARNING: hermes-mcp exited immediately - see $LOG_DIR/mcp.log"
+    fi
   fi
 else
   log "no ~/.hermes-mcp-oauth.txt - skipping hermes-mcp"
