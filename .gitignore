@@ -1,0 +1,21 @@
+# Secrets and local runtime state - never commit
+.env
+.env.*
+!.env.example
+*.env
+keys.json
+keys.py
+secrets.json
+
+# Cloudflare wrangler local state
+.wrangler/
+worker-configuration.d.ts
+
+# Node / build
+node_modules/
+dist/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

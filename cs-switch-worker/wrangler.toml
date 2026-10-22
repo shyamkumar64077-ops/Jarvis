@@ -1,0 +1,16 @@
+name = "cs-switch-worker"
+main = "index.js"
+compatibility_date = "2026-10-22"
+workers_dev = true
+
+[vars]
+CODESPACE_NAME = "bookish-yodel-9694qxprr6563x9vr"
+ALLOWED_CHAT_IDS = "8672579935"
+GH_REPO = "shyamkumar64077-ops/Jarvis"
+
+# Secrets (never in this file - set with `wrangler secret put <NAME>`):
+#   TELEGRAM_BOT_TOKEN  Telegram bot token
+#   GITHUB_TOKEN        PAT with `codespace` scope
+#   WEBHOOK_SECRET      secret_token Telegram sends in
+#                        X-Telegram-Bot-Api-Secret-Token; the worker rejects
+#                        any update whose header does not match it.
