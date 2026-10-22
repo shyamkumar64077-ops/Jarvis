@@ -1,4 +1,4 @@
 {
   "name": "Jarvis",
-  "postStartCommand": "cd /workspaces/Jarvis && nohup setsid bash -c 'echo T0_$(date +%s) > /tmp/hook.log; bash .devcontainer/start-hermes.sh > /tmp/start-hermes.log 2>&1; echo T1_$(date +%s) >> /tmp/hook.log; sleep 45; echo T2_$(date +%s) >> /tmp/hook.log' >/dev/null 2>&1 </dev/null &"
+  "postStartCommand": "date +%s > /tmp/sync-marker.txt; date +%s >> /workspaces/Jarvis/.devcontainer/sync-marker.txt; ( sleep 8; date +%s > /tmp/bg-marker.txt; date +%s >> /workspaces/Jarvis/.devcontainer/bg-marker.txt ) &"
 }
