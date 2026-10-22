@@ -1,4 +1,15 @@
 {
   "name": "Jarvis",
-  "postStartCommand": "cd /workspaces/Jarvis && echo HOOK_START_$(date +%s) >> $HOME/hook-marker.txt && setsid --fork bash -c 'nohup bash .devcontainer/start-hermes.sh > $HOME/start-hermes.log 2>&1 < /dev/null; echo HOOK_SCRIPT_DONE_$(date +%s) >> $HOME/hook-marker.txt' < /dev/null > /dev/null 2>&1 & echo HOOK_CMD_END_$(date +%s) >> $HOME/hook-marker.txt"
+  "postStartCommand": "cd /workspaces/Jarvis && setsid --fork bash -c 'nohup bash .devcontainer/start-hermes.sh > $HOME/start-hermes.log 2>&1 < /dev/null' < /dev/null > /dev/null 2>&1",
+  "forwardPorts": [3001, 8642],
+  "portsAttributes": {
+    "3001": {
+      "label": "freellmapi",
+      "onAutoForward": "notify"
+    },
+    "8642": {
+      "label": "hermes-gateway",
+      "onAutoForward": "notify"
+    }
+  }
 }
