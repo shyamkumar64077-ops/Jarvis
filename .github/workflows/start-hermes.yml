@@ -7,27 +7,36 @@ on:
         description: "Codespace name"
         required: false
         default: "bookish-yodel-9694qxprr6563x9vr"
-      wait:
-        description: "Wait for codespace to be available before starting"
+      boot:
+        description: "Start the codespace if it is stopped"
         required: false
         default: "true"
 
 permissions:
   actions: read
   contents: read
-  packages: read
 
 jobs:
   start-hermes:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
+      GH_TOKEN: ${{ secrets.CODESPA_PAT }}
     steps:
+      - name: Start the codespace if stopped
+        if: ${{ inputs.boot != 'false' }}
+        run: |
+          state=$(gh api "/user/codespaces/$CS" --jq '.state' || echo unknown)
+          echo "state=$state"
+          if [ "$state" = "Shutdown" ] || [ "$state" = "Stopped" ]; then
+            gh api -X POST "/user/codespaces/$CS/start" >/dev/null && echo "start requested"
+          fi
+
       - name: Wait for codespace to be running
-        env:
-          CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
         run: |
           for i in $(seq 1 40); do
-            state=$(gh api "/user/codespaces/$CS" --jq '.state' 2>/dev/null || echo unknown)
+            state=$(gh api "/user/codespaces/$CS" --jq '.state' || echo unknown)
             echo "attempt $i: state=$state"
             if [ "$state" = "Available" ] || [ "$state" = "Running" ]; then
               echo "codespace is up"
@@ -39,18 +48,15 @@ jobs:
           exit 1
 
       - name: Start freellmapi + Hermes gateway inside the codespace
-        env:
-          CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
         run: |
           gh codespace ssh -c "$CS" -- bash /workspaces/Jarvis/.devcontainer/start-hermes.sh || true
           sleep 45
           gh codespace ssh -c "$CS" -- bash -c 'curl -s -o /dev/null -w "flm3001:%{http_code}\n" http://127.0.0.1:3001/v1/models; curl -s -o /dev/null -w "gw8642:%{http_code}\n" http://127.0.0.1:8642/v1/health'
 
       - name: Make the forwarded ports public
-        env:
-          CS: ${{ inputs.codespace || 'bookish-yodel-9694qxprr6563x9vr' }}
         run: |
           gh codespace ports forward -c "$CS" 8642:8642 3001:3001 &
-          sleep 15
+          sleep 20
           gh codespace ports visibility -c "$CS" 8642:public 3001:public || true
           gh codespace ports -c "$CS" --json sourcePort,visibility,browseUrl || true
+          curl -s -o /dev/null -w "public_health:%{http_code}\n" "https://$CS-8642.app.github.dev/v1/health" || true
