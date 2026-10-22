@@ -1,4 +1,4 @@
 {
   "name": "Jarvis",
-  "postStartCommand": "date +%s >> /workspaces/Jarvis/.devcontainer/m-sync.txt; date +%s > /tmp/m-sync.txt; ( sleep 6; date +%s >> /workspaces/Jarvis/.devcontainer/m-sub.txt ) & disown; nohup setsid bash -c 'sleep 6; date +%s >> /workspaces/Jarvis/.devcontainer/m-nohup-setsid.txt' >/dev/null 2>&1 </dev/null & disown; setsid --fork bash -c 'sleep 6; date +%s >> /workspaces/Jarvis/.devcontainer/m-setsidfork.txt' >/dev/null 2>&1 </dev/null & disown"
+  "postStartCommand": "cd /workspaces/Jarvis && setsid --fork bash -c 'nohup bash .devcontainer/start-hermes.sh > /tmp/start-hermes.log 2>&1 < /dev/null' < /dev/null > /dev/null 2>&1"
 }
