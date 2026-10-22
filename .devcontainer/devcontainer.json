@@ -1,4 +1,4 @@
 {
   "name": "Jarvis",
-  "postStartCommand": "echo SYNC_$(date +%s) >> /workspaces/Jarvis/PROBE.txt; echo SYNC_TMP_$(date +%s) >> /tmp/PROBE.txt; ( sleep 45; echo SUBSHELL_$(date +%s) >> /workspaces/Jarvis/PROBE.txt ) & disown; nohup setsid bash -c 'sleep 45; echo NOHUP_SETSID_$(date +%s) >> /workspaces/Jarvis/PROBE.txt' >/dev/null 2>&1 </dev/null & disown; setsid --fork bash -c 'sleep 45; echo SETSID_FORK_$(date +%s) >> /workspaces/Jarvis/PROBE.txt' >/dev/null 2>&1 </dev/null & disown; echo SYNC_END_$(date +%s) >> /workspaces/Jarvis/PROBE.txt"
+  "postStartCommand": "cd /workspaces/Jarvis && echo HOOK_START_$(date +%s) >> $HOME/hook-marker.txt && setsid --fork bash -c 'nohup bash .devcontainer/start-hermes.sh > $HOME/start-hermes.log 2>&1 < /dev/null; echo HOOK_SCRIPT_DONE_$(date +%s) >> $HOME/hook-marker.txt' < /dev/null > /dev/null 2>&1 & echo HOOK_CMD_END_$(date +%s) >> $HOME/hook-marker.txt"
 }
