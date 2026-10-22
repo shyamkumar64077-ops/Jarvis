@@ -1,6 +1,6 @@
 {
   "name": "Jarvis",
-  "postStartCommand": "cd /workspaces/Jarvis && setsid --fork bash -c 'nohup bash .devcontainer/start-hermes.sh > $HOME/start-hermes.log 2>&1 < /dev/null' < /dev/null > /dev/null 2>&1",
+  "postStartCommand": "nohup bash -c 'sleep 10; bash .devcontainer/start-hermes.sh' > /tmp/start-hermes.log 2>&1 &",
   "forwardPorts": [3001, 8642],
   "portsAttributes": {
     "3001": {
