@@ -1,4 +1,4 @@
 {
   "name": "Jarvis",
-  "postStartCommand": "bash /workspaces/Jarvis/.devcontainer/start-hermes.sh"
+  "postStartCommand": "cd /workspaces/Jarvis && nohup setsid bash .devcontainer/start-hermes.sh > /tmp/start-hermes.log 2>&1 < /dev/null &"
 }
