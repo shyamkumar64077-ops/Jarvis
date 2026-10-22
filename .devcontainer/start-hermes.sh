@@ -152,10 +152,13 @@ if port_up "$FLM_PORT"; then
 else
   log "starting freellmapi on $FLM_PORT"
   if [ -d "$FLM_SERVER_DIR" ]; then
+    # setsid --fork puts the service in its OWN session and process group.
+    # A plain `nohup ... &` child stays in the caller's process group, so it
+    # is torn down when the devcontainer lifecycle exec session ends - which
+    # is why the services used to vanish a moment after the hook returned.
     (
       cd "$FLM_SERVER_DIR" || exit 1
-      PORT="$FLM_PORT" nohup npx tsx src/index.ts > "$LOG_DIR/freellmapi-server.log" 2>&1 &
-      disown
+      PORT="$FLM_PORT" setsid --fork bash -c "nohup npx tsx src/index.ts > '$LOG_DIR/freellmapi-server.log' 2>&1 < /dev/null"
     ) >/dev/null 2>&1
   else
     log "ERROR: $FLM_SERVER_DIR not found - freellmapi not started"
@@ -169,8 +172,7 @@ if port_up "$GW_PORT"; then
 else
   log "starting hermes gateway on $GW_PORT"
   if command -v hermes >/dev/null 2>&1; then
-    nohup hermes gateway run > "$LOG_DIR/gateway.log" 2>&1 &
-    disown
+    setsid --fork bash -c "nohup hermes gateway run > '$LOG_DIR/gateway.log' 2>&1 < /dev/null"
   else
     log "ERROR: hermes binary not on PATH - gateway not started"
   fi
@@ -222,8 +224,7 @@ wait_ready "$FLM_PORT" "freellmapi" "/v1/models" || rc=1
 if ! wait_ready "$GW_PORT" "hermes gateway" "/v1/health"; then
   log "hermes gateway did not come up - retrying once"
   if command -v hermes >/dev/null 2>&1; then
-    nohup hermes gateway run > "$LOG_DIR/gateway.log" 2>&1 &
-    disown
+    setsid --fork bash -c "nohup hermes gateway run > '$LOG_DIR/gateway.log' 2>&1 < /dev/null"
     wait_ready "$GW_PORT" "hermes gateway (retry)" "/v1/health" || rc=1
   else
     rc=1
