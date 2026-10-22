@@ -111,6 +111,14 @@ ensure_hermes() {
 ensure_freellmapi || true
 ensure_hermes || true
 
+# The install above can take several minutes. `hermes gateway run` resolves
+# its own Python dependencies on first launch, and starting it while that
+# is still going on produces a BrokenPipeError and an immediate exit.
+# Give the resolver a moment to settle before we try to start the gateway.
+if [ -f "$LOG_DIR/gateway.log" ] && [ ! -s "$LOG_DIR/gateway.log" ]; then
+  sleep 5
+fi
+
 # --- helpers ---------------------------------------------------------------
 
 # port_up <port> -> 0 when something is listening and answering on the port.
@@ -206,7 +214,21 @@ fi
 
 rc=0
 wait_ready "$FLM_PORT" "freellmapi" "/v1/models" || rc=1
-wait_ready "$GW_PORT" "hermes gateway" "/v1/health" || rc=1
+
+# The gateway can fail its first launch while it resolves its own Python
+# dependencies (BrokenPipeError in pm/worker.py) and then exit. Retry once
+# before declaring it failed - by then the dependencies are cached and the
+# second launch comes up cleanly.
+if ! wait_ready "$GW_PORT" "hermes gateway" "/v1/health"; then
+  log "hermes gateway did not come up - retrying once"
+  if command -v hermes >/dev/null 2>&1; then
+    nohup hermes gateway run > "$LOG_DIR/gateway.log" 2>&1 &
+    disown
+    wait_ready "$GW_PORT" "hermes gateway (retry)" "/v1/health" || rc=1
+  else
+    rc=1
+  fi
+fi
 
 if [ "$rc" -eq 0 ]; then
   log "startup complete - all services healthy"
