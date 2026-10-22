@@ -68,19 +68,38 @@ ensure_hermes() {
   fi
   log "hermes binary not on PATH - installing"
 
-  if ! command -v pipx >/dev/null 2>&1 && ! command -v pip3 >/dev/null 2>&1; then
-    log "ERROR: no pipx/pip3 available - cannot install hermes"
+  # Hermes ships as a git checkout with a venv next to it (that is how the
+  # working install is laid out: <repo>/venv/bin/hermes). A pipx install of
+  # the published package can land without the console script, so the
+  # checkout route is the reliable one.
+  local repo="$HOME/hermes-agent"
+  local venv="$repo/venv"
+
+  if [ ! -d "$repo/.git" ]; then
+    git clone --depth 1 https://github.com/NousResearch/hermes-agent.git "$repo" \
+      2>&1 | sed 's/^/[start-hermes] /' || true
+  else
+    git -C "$repo" pull --ff-only 2>&1 | sed 's/^/[start-hermes] /' || true
+  fi
+
+  if [ ! -d "$repo" ]; then
+    log "ERROR: could not obtain the hermes-agent checkout"
     return 1
   fi
 
-  if command -v pipx >/dev/null 2>&1; then
-    pipx install hermes-agent > "$LOG_DIR/hermes-install.log" 2>&1 || true
-  else
-    pip3 install --user hermes-agent > "$LOG_DIR/hermes-install.log" 2>&1 || true
+  if [ ! -x "$venv/bin/hermes" ]; then
+    log "creating venv and installing hermes"
+    if command -v uv >/dev/null 2>&1; then
+      ( cd "$repo" && uv venv venv && uv pip install -e . ) \
+        > "$LOG_DIR/hermes-install.log" 2>&1 || true
+    else
+      ( cd "$repo" && python3 -m venv venv && "$venv/bin/pip" install -e . ) \
+        > "$LOG_DIR/hermes-install.log" 2>&1 || true
+    fi
   fi
 
   # Refresh PATH - a fresh install may have landed in ~/.local/bin.
-  export PATH="$HOME/.local/bin:$HOME/.local/pipx/venvs/hermes-agent/bin:$PATH"
+  export PATH="$HOME/.local/bin:$venv/bin:$PATH"
 
   if ! command -v hermes >/dev/null 2>&1; then
     log "ERROR: hermes still not on PATH after install attempt"
