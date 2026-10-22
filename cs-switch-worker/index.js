@@ -5,11 +5,17 @@
 // Secrets: TELEGRAM_BOT_TOKEN, GITHUB_TOKEN, WEBHOOK_SECRET
 //
 // Commands (Telegram):
-//   /on     -> POST https://api.github.com/user/codespaces/{name}/start
-//              poll until Available, then make ports 8642 + 3001 public
+//   /on     -> wait for a startable state, POST .../start, poll until
+//              Available, then make ports 8642 + 3001 public
 //   /off    -> POST https://api.github.com/user/codespaces/{name}/stop
 //   /status -> GET  https://api.github.com/user/codespaces/{name}
 //   /ports  -> report / refresh the current port visibility
+//   /help   -> show the interactive menu
+//
+// Every reply carries an inline keyboard (getInlineKeyboard) with the
+// Turn ON / Turn OFF / Check Status buttons. Button presses arrive as
+// callback_query updates with data "action_on" / "action_off" /
+// "action_status" and are routed to the same handlers.
 //
 // ---------------------------------------------------------------------------
 // Port visibility - how it really works
@@ -73,15 +79,47 @@ async function csState(env) {
   return "unknown";
 }
 
-async function tgSend(env, chatId, text) {
+async function tgSend(env, chatId, text, extra = {}) {
   try {
     await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify({ chat_id: chatId, text, ...extra }),
     });
   } catch (e) {
     console.error("tgSend failed", e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Inline keyboard
+// ---------------------------------------------------------------------------
+
+// The persistent menu shown under every bot reply. Each button carries a
+// callback_data value that the callback_query handler routes back to the
+// same code path as the equivalent slash command.
+function getInlineKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🟢 Turn ON", callback_data: "action_on" }],
+      [{ text: "🔴 Turn OFF", callback_data: "action_off" }],
+      [{ text: "📊 Check Status", callback_data: "action_status" }],
+    ],
+  };
+}
+
+// Answer a button press so Telegram removes the loading spinner on it.
+// Always called first, before the (potentially slow) action runs, because
+// Telegram shows a spinner for ~30s on an unanswered callback query.
+async function tgAnswerCallback(env, callbackQueryId, text = "") {
+  try {
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+    });
+  } catch (e) {
+    console.error("tgAnswerCallback failed", e);
   }
 }
 
@@ -236,10 +274,63 @@ async function waitForAvailable(env, maxAttempts = POLL_MAX_ATTEMPTS) {
   return { ok: false, state: last, attempts: maxAttempts };
 }
 
-// Full `/on` flow: start -> wait until Available -> publish ports -> report.
+// States in which a codespace is mid-transition and a start/stop request
+// would be rejected with 409 Conflict.
+const TRANSITIONAL_STATES = ["ShuttingDown", "Starting", "Queued", "Stopping", "Rebuilding"];
+const START_WAIT_MAX_ATTEMPTS = 12;   // 12 x 5s = 60s
+
+// Wait until the codespace is in a state where a start request is legal.
+//
+// Toggling /off -> /on quickly hits "409 Conflict" because the codespace is
+// still ShuttingDown when the start request arrives. GitHub reports those
+// states as: ShuttingDown, Starting, Queued, Stopping, Rebuilding.
+//
+// Terminal state for this wait: Shutdown or Available (both accept a
+// start request). Anything else after the timeout is an abort.
+async function waitForStartableState(env, chatId, maxAttempts = START_WAIT_MAX_ATTEMPTS) {
+  let state = await csState(env);
+  for (let i = 0; i < maxAttempts; i++) {
+    if (!TRANSITIONAL_STATES.includes(state)) {
+      return { ok: true, state, waited: i };
+    }
+    await tgSend(env, chatId, `Codespace is currently ${state}. Waiting to start...`);
+    await new Promise(res => setTimeout(res, POLL_INTERVAL_MS));
+    state = await csState(env);
+  }
+  return { ok: false, state, waited: maxAttempts };
+}
+
+// Stop the codespace, refusing to send a stop request while it is already
+// transitioning (GitHub answers 409 Conflict for that).
+async function handleOff(env, chatId, codespace) {
+  const st = await csState(env);
+  if (["Shutdown", "Stopped", "Stopping", "ShuttingDown"].includes(st)) {
+    await tgSend(env, chatId, `Codespace is already ${st}.`,
+      { reply_markup: getInlineKeyboard() });
+    return { ok: true, stage: "already-off", state: st };
+  }
+  const r = await gh(env, `/user/codespaces/${codespace}/stop`, "POST");
+  await tgSend(env, chatId, r.ok
+    ? `Stop requested for ${codespace}.`
+    : `Failed to stop (HTTP ${r.status}).`,
+    { reply_markup: getInlineKeyboard() });
+  return { ok: r.ok, stage: "stop", status: r.status };
+}
+
+// Full `/on` flow: wait for a startable state -> start -> wait until
+// Available -> publish ports -> report.
 async function handleOn(env, chatId) {
   const cs = env.CODESPACE_NAME;
 
+  // 1. Make sure the codespace is not mid-transition (avoids 409 Conflict).
+  const ready2Start = await waitForStartableState(env, chatId);
+  if (!ready2Start.ok) {
+    await tgSend(env, chatId,
+      `Timed out after ${ready2Start.waited * 5}s waiting for the codespace to settle (state=${ready2Start.state}). Start aborted.`);
+    return { ok: false, stage: "wait-startable", state: ready2Start.state };
+  }
+
+  // 2. Start it.
   const start = await gh(env, `/user/codespaces/${cs}/start`, "POST");
   if (!start.ok) {
     await tgSend(env, chatId, `Failed to start ${cs} (HTTP ${start.status}).`);
@@ -281,7 +372,9 @@ export default {
     }
 
     if (request.method !== "POST" ||
-        (url.pathname !== "/webhook" && url.pathname !== "/webhook/register")) {
+        (url.pathname !== "/webhook" &&
+         url.pathname !== "/webhook/register" &&
+         url.pathname !== "/webhook/menu")) {
       return new Response("not found", { status: 404 });
     }
 
@@ -317,8 +410,78 @@ export default {
       });
     }
 
+    // Register the native command menu (the "/" button in the Telegram chat).
+    //
+    // The bot token only exists inside this worker's secrets, so the worker
+    // registers its own menu - exactly like /webhook/register above.
+    // Gated by the same secret token.
+    if (url.pathname === "/webhook/menu") {
+      const commands = [
+        { command: "on", description: "🟢 Start Codespace" },
+        { command: "off", description: "🔴 Stop Codespace" },
+        { command: "status", description: "📊 Check Status" },
+        { command: "help", description: "❓ Show Menu" },
+      ];
+      const r = await fetch(
+        `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/setMyCommands`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ commands }),
+        },
+      );
+      const body = await r.text();
+      return new Response(body, {
+        status: r.ok ? 200 : 502,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     let update;
     try { update = await request.json(); } catch { return new Response("bad json", { status: 400 }); }
+
+    // ---------------------------------------------------------------------
+    // Button clicks (callback_query)
+    // ---------------------------------------------------------------------
+    const cb = update.callback_query;
+    if (cb) {
+      const cbChatId = cb.message && cb.message.chat ? String(cb.message.chat.id) : null;
+      if (!cbChatId) return new Response("ok", { status: 200 });
+
+      if (allowed.length && !allowed.includes(cbChatId)) {
+        // Answer first so the spinner clears even for a rejected press.
+        await tgAnswerCallback(env, cb.id, "Not authorized.");
+        return new Response("ok", { status: 200 });
+      }
+
+      // Clear the loading spinner immediately, then run the action.
+      await tgAnswerCallback(env, cb.id);
+
+      const action = String(cb.data || "");
+      try {
+        if (action === "action_on") {
+          ctx.waitUntil(handleOn(env, cbChatId).catch(e => {
+            console.error("handleOn failed", e);
+            return tgSend(env, cbChatId, `Error: ${e && e.message ? e.message : e}`,
+              { reply_markup: getInlineKeyboard() });
+          }));
+          await tgSend(env, cbChatId, `Starting ${codespace} and publishing ports...`,
+            { reply_markup: getInlineKeyboard() });
+        } else if (action === "action_off") {
+          await handleOff(env, cbChatId, codespace);
+        } else if (action === "action_status") {
+          const st = await csState(env);
+          await tgSend(env, cbChatId, `Codespace ${codespace} state: ${st}`,
+            { reply_markup: getInlineKeyboard() });
+        } else {
+          await tgSend(env, cbChatId, "Unknown action.", { reply_markup: getInlineKeyboard() });
+        }
+      } catch (e) {
+        await tgSend(env, cbChatId, `Error: ${e && e.message ? e.message : e}`,
+          { reply_markup: getInlineKeyboard() });
+      }
+      return new Response("ok", { status: 200 });
+    }
 
     const msg = update.message || update.edited_message;
     if (!msg || !msg.chat) return new Response("ok", { status: 200 });
@@ -333,7 +496,7 @@ export default {
     const cmd = raw.split(/\s+/)[0].toLowerCase().replace(/^\//, "");
 
     try {
-      if (cmd === "on" || cmd === "start") {
+      if (cmd === "on") {
         // Start + poll + port publishing can take over a minute.
         // Telegram expects a fast 200 and retries slow webhooks, so the
         // long running work is handed to waitUntil. The "ports are public"
@@ -341,31 +504,36 @@ export default {
         // "done" once the ports really are public.
         ctx.waitUntil(handleOn(env, chatId).catch(e => {
           console.error("handleOn failed", e);
-          return tgSend(env, chatId, `Error: ${e && e.message ? e.message : e}`);
+          return tgSend(env, chatId, `Error: ${e && e.message ? e.message : e}`,
+            { reply_markup: getInlineKeyboard() });
         }));
-        await tgSend(env, chatId, `Starting ${codespace} and publishing ports...`);
-      } else if (cmd === "off" || cmd === "stop") {
-        const st = await csState(env);
-        if (["Shutdown", "Stopped", "Stopping"].includes(st)) {
-          await tgSend(env, chatId, `Codespace is already ${st}.`);
-        } else {
-          const r = await gh(env, `/user/codespaces/${codespace}/stop`, "POST");
-          await tgSend(env, chatId, r.ok
-            ? `Stop requested for ${codespace}.`
-            : `Failed to stop (HTTP ${r.status}).`);
-        }
+        await tgSend(env, chatId, `Starting ${codespace} and publishing ports...`,
+          { reply_markup: getInlineKeyboard() });
+      } else if (cmd === "off") {
+        await handleOff(env, chatId, codespace);
       } else if (cmd === "status") {
         const st = await csState(env);
-        await tgSend(env, chatId, `Codespace ${codespace} state: ${st}`);
+        await tgSend(env, chatId, `Codespace ${codespace} state: ${st}`,
+          { reply_markup: getInlineKeyboard() });
       } else if (cmd === "ports") {
         const results = await publishPorts(env);
         const detail = results.map(r => r.ok ? `${r.port}: public` : `${r.port}: FAILED (${r.error})`).join("\n");
-        await tgSend(env, chatId, `Port visibility for ${codespace}:\n${detail}`);
+        await tgSend(env, chatId, `Port visibility for ${codespace}:\n${detail}`,
+          { reply_markup: getInlineKeyboard() });
+      } else if (cmd === "start" || cmd === "help" || cmd === "menu" || cmd === "") {
+        await tgSend(env, chatId,
+          "Codespace control menu:\n\n🟢 Turn ON  - start the codespace and publish ports\n" +
+          "🔴 Turn OFF - stop the codespace\n" +
+          "📊 Check Status - show the current state\n\n" +
+          "Commands: /on  /off  /status  /ports",
+          { reply_markup: getInlineKeyboard() });
       } else {
-        await tgSend(env, chatId, "Commands: /on  /off  /status  /ports");
+        await tgSend(env, chatId, "Commands: /on  /off  /status  /ports",
+          { reply_markup: getInlineKeyboard() });
       }
     } catch (e) {
-      await tgSend(env, chatId, `Error: ${e && e.message ? e.message : e}`);
+      await tgSend(env, chatId, `Error: ${e && e.message ? e.message : e}`,
+        { reply_markup: getInlineKeyboard() });
     }
 
     return new Response("ok", { status: 200 });
