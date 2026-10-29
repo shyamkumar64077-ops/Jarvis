@@ -1,5 +1,5 @@
 #!/bin/bash
-pkill -9 -f 'hermes.*gateway'
+pkill -9 -f 'hermes.*gateway' 2>/dev/null
 export API_SERVER_ENABLED=true
 export API_SERVER_HOST=0.0.0.0
 export API_SERVER_PORT=8642
