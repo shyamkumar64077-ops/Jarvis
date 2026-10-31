@@ -1,17 +1,9 @@
 {
-  "name": "Jarvis",
-  "updateContentCommand": "npm install --prefix /workspace/freellmapi",
-  "postCreateCommand": "echo 'Codespace ready. Secrets and user-specific config can be set here.'",
+  "name": "Hermes Environment",
   "postStartCommand": "nohup bash -c 'sleep 10; bash .devcontainer/start-hermes.sh' > /tmp/start-hermes.log 2>&1 &",
   "forwardPorts": [3001, 8642],
   "portsAttributes": {
-    "3001": {
-      "label": "freellmapi",
-      "onAutoForward": "notify"
-    },
-    "8642": {
-      "label": "hermes-gateway",
-      "onAutoForward": "notify"
-    }
+    "8642": { "label": "Hermes Gateway", "onAutoForward": "silent", "visibility": "public" },
+    "3001": { "label": "FreeLLM API", "onAutoForward": "silent", "visibility": "public" }
   }
 }
