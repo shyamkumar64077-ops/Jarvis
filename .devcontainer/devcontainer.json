@@ -4,6 +4,6 @@
   "forwardPorts": [3001, 8642],
   "portsAttributes": {
     "8642": { "label": "Hermes Gateway", "onAutoForward": "silent", "visibility": "public" },
-    "3001": { "label": "FreeLLM API", "onAutoForward": "silent", "visibility": "public" }
+    "3001": { "label": "Cloud Proxy", "onAutoForward": "silent", "visibility": "public" }
   }
 }
