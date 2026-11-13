@@ -1,9 +1,21 @@
 {
-  "name": "Hermes Environment",
-  "postStartCommand": "nohup bash -c 'sleep 10; bash .devcontainer/start-hermes.sh' > /tmp/start-hermes.log 2>&1 &",
-  "forwardPorts": [3001, 8642],
+  "name": "Jarvis",
+  "updateContentCommand": "npm install --prefix /workspace/freellmapi",
+  "postCreateCommand": "echo 'Codespace ready. Secrets and user-specific config can be set here.'",
+  "postStartCommand": "pkill -9 -f 'hermes.*gateway' || true; nohup node /workspace/proxy/proxy.js > /workspace/proxy.log 2>&1 & export HERMES_BASE_URL=http://127.0.0.1:4000/v1; nohup /home/codespace/.python/current/bin/hermes -p default gateway run > /workspace/gateway.log 2>&1 & curl -s -X POST https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage -d chat_id=${TELEGRAM_CHAT_ID} -d text=\"Codespace started: proxy on 4000, Hermes gateway on 8642\" > /dev/null 2>&1 &",
+  "forwardPorts": [3001, 4000, 8642],
   "portsAttributes": {
-    "8642": { "label": "Hermes Gateway", "onAutoForward": "silent", "visibility": "public" },
-    "3001": { "label": "Cloud Proxy", "onAutoForward": "silent", "visibility": "public" }
+    "3001": {
+      "label": "freellmapi",
+      "onAutoForward": "notify"
+    },
+    "4000": {
+      "label": "proxy",
+      "onAutoForward": "notify"
+    },
+    "8642": {
+      "label": "hermes-gateway",
+      "onAutoForward": "notify"
+    }
   }
 }
